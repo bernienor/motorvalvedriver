@@ -1,9 +1,10 @@
 /**
    @brief Driver for exhaustvalve for motor. HVL project spring 2018
-
-
-
 **/
+
+#include <avr/io.h>
+#include <avr/interrupt.h>
+ 
 
 // #define DEBUG 1
 
@@ -11,6 +12,7 @@
 #define outputpin    12
 #define outputPinLED 13 // LED pin for test and flach for angleplate readout
 
+#define offset 40.0 // Hardcoded offset for system. Could also be set?
 
 void serport_handler(char d);
 void print_float(float f);
@@ -23,23 +25,27 @@ volatile int updated = 0;
 volatile float ontime = 0;
 volatile float offtime = 123.4;
 volatile char mode = 0;   // Bad name. Is used to keep track of the outputpinstate. Redundant?
+volatile uint16_t precalc_TCNT1 = 61717; // Test value
+volatile uint16_t precalc_OCR1A = 64495; // Test value
+
+
 /**
    @brief Interrupt routine for the interrupt line.
+   @todo: rename to a more correct and descriptive name name...
 **/
 void measure_time() {
   unsigned long us = micros();
-  // load and start timer
+
   digitalWrite(outputPinLED, HIGH); // Turn led ON
-  reset_timer();
+  start_timer();
   if (us > lastvalue) {
     counts[counts_idx] = us - lastvalue;
     counts_idx = (counts_idx + 1) % 16;
     updated = 1;
   }
   lastvalue = us;
-  delayMicroseconds(100); // Flash time
+  delayMicroseconds(1000); // Flash time
   digitalWrite(outputPinLED, LOW); // Turn led ON
-
 }
 
 
@@ -54,25 +60,54 @@ void setup() {
   attachInterrupt(0, measure_time, RISING);
 
   Serial.begin(115200);
-  Timer1.initialize(2200);
-  Timer1.stop();
   print_menu_Serial();
 }
 
 
 /**
-   @todo Add Debugoutput on serial port
+   @brief Main loop. Handles serial input and update of variables according to data from last interrupt
 
 **/
 void loop() {
+  static uint32_t cnt=0;
   if (Serial.available()) {
     serport_handler(Serial.read());
   }
   if (updated != 0) {
-    // Update timervals
+    update_precalcvalues(); // Update timervals
+    Serial.print('.');
+    if(cnt++>60){
+      Serial.print('\n');
+      cnt = 0;
+    }
+    updated = 0;
   }
 }
 
+/*
+ * @brief calculates the timer values 
+ * Sorry for the messy calculations. See notes to be more confused...
+ */
+void update_precalcvalues(void)
+{
+  uint32_t periodetid=0;
+  float temp;
+  float periodetidf;
+
+  return;
+  for(int i = 0; i<16;i++){
+    periodetid += counts[i];
+  }
+  periodetidf = periodetid / 16;
+
+  // precalc_TCNT1:
+  temp = 65536.0 - (((offset+offtime)/360.0) * periodetidf);
+  precalc_TCNT1 = (uint16_t)temp;
+  
+  // precalc_OCR1A:
+  temp = 65536.0 - (((offtime-ontime)/360.0) * periodetidf);
+  precalc_OCR1A = (uint16_t)temp;
+}
 
 /**
    @brief Prints a menu and handles simple inputs
@@ -96,8 +131,8 @@ void serport_handler(char d)
 }
 
 
-/** @brief simple processing of "semi modbus" message
-    @returns -1 on error, 0 on success
+/** 
+ *  @brief simple processing ascii input data
 **/
 void process_serialdata(char* buf)
 {
@@ -113,10 +148,26 @@ void process_serialdata(char* buf)
     temp = readtime(&buf[4]);
     if (verifyinput("off", temp)) {
       offtime = temp;
+    } else if (strncmp(buf, "x", 1) == 0) {
+      print_counts();
     }
   }
 
   print_menu_Serial();
+}
+
+
+/**
+ * @brief Print out number of counts on serial port. Debug info
+ */
+void print_counts(void)
+{
+  uint32_t cnt=0;
+  for(int i=0;i<16;i++){
+    cnt += counts[i];
+  }
+  Serial.print("\nCounts:");
+  Serial.println(cnt, DEC);
 }
 
 
@@ -139,7 +190,9 @@ void print_menu_Serial(void)
   Serial.println("");
 }
 
-
+/**
+ *  @brief Reads floats from ascii string in a array
+**/
 float readtime(char * buf)
 {
   float val;
@@ -159,7 +212,7 @@ float readtime(char * buf)
   return (val);
 }
 
-/// @brief prints a float on the format xxx.y
+/// @brief prints a float on the format xxx.yy
 void print_float(float f) {
   int temp = f;
   Serial.print(temp);
@@ -172,7 +225,10 @@ void print_float(float f) {
   Serial.print(temp);
 }
 
-
+/**
+ * @brief Asks the user to verify the input data. 
+ * @return 1 if verified, 0 if not.
+**/
 int verifyinput(char * text, float val) {
   Serial.print("Bekreft at ");
   Serial.print(text);
@@ -186,18 +242,32 @@ int verifyinput(char * text, float val) {
   return 0;
 }
 
-void timer1_isr(void)
+
+/**
+ * @brief interrupt when timer 1 has conted up to max (overflow). Disables the timer 
+**/
+ISR(TIMER1_OVF_vect)          // interrupt service routine that wraps a user defined function supplied by attachInterrupt
 {
-  if (mode == 0) {
-    digitalWrite(outputpin, HIGH);
-    // load timer
-  } else {
-    digitalWrite(outputpin, LOW);
-    // stop timer
-  }
+  //TCCR1B = 0; // stop timer
+  digitalWrite(outputpin, LOW); // Turn off output signal
 }
 
-void reset_timer(void) {
+ISR(TIMER1_COMPA_vect)
+{
+  digitalWrite(outputpin, HIGH); // Turn off output signal  
+}
 
+/**
+ * @brief Sets up and starts timer 1.
+ * http://ww1.microchip.com/downloads/en/DeviceDoc/Atmel-42735-8-bit-AVR-Microcontroller-ATmega328-328P_Datasheet.pdf
+**/
+void start_timer(void) {
+
+  TCNT1 = precalc_TCNT1; // 61717; // test
+  OCR1A = precalc_OCR1A; // 64495;
+  // From datasheet p161: TCCR1A.WGM1[3:0]=0x0
+  TCCR1A = 0; // No OCR1A/OCR1B connection, Normal mode.
+  TCCR1B = (1>>CS12); // Clock source: clk/265
+  TIMSK1 = (1>>OCIE1A) | (1>>TOIE1); // Two interrupt sources. Outputcompare match A, and timer overflow.
 }
 
