@@ -14,9 +14,12 @@
 
 #define offset 40.0 // Hardcoded offset for system. Could also be set?
 
+
 void serport_handler(char d);
 void print_float(float f);
-
+void start_timer(void);
+void print_menu_Serial(void);
+void update_precalcvalues(void);
 
 volatile unsigned long counts[16] = {0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0};
 volatile unsigned long lastvalue = 0;
@@ -69,17 +72,11 @@ void setup() {
 
 **/
 void loop() {
-  static uint32_t cnt=0;
   if (Serial.available()) {
     serport_handler(Serial.read());
   }
   if (updated != 0) {
     update_precalcvalues(); // Update timervals
-    Serial.print('.');
-    if(cnt++>60){
-      Serial.print('\n');
-      cnt = 0;
-    }
     updated = 0;
   }
 }
@@ -94,12 +91,12 @@ void update_precalcvalues(void)
   float temp;
   float periodetidf;
 
-  return;
+
   for(int i = 0; i<16;i++){
     periodetid += counts[i];
   }
-  periodetidf = periodetid / 16;
-
+  periodetidf = periodetid / 256; // Convert time in us to time in timer1 counts as well as devide by 16 for the average.
+  
   // precalc_TCNT1:
   temp = 65536.0 - (((offset+offtime)/360.0) * periodetidf);
   precalc_TCNT1 = (uint16_t)temp;
@@ -248,13 +245,21 @@ int verifyinput(char * text, float val) {
 **/
 ISR(TIMER1_OVF_vect)          // interrupt service routine that wraps a user defined function supplied by attachInterrupt
 {
-  //TCCR1B = 0; // stop timer
+  TCCR1B = 0; // stop timer
   digitalWrite(outputpin, LOW); // Turn off output signal
 }
 
 ISR(TIMER1_COMPA_vect)
 {
   digitalWrite(outputpin, HIGH); // Turn off output signal  
+}
+
+/**
+ * @brief Handler for all non alloctated interrupts.
+ */
+ISR(BADISR_vect)
+{
+  Serial.println("Bad Interrupt catched!");
 }
 
 /**
@@ -267,7 +272,7 @@ void start_timer(void) {
   OCR1A = precalc_OCR1A; // 64495;
   // From datasheet p161: TCCR1A.WGM1[3:0]=0x0
   TCCR1A = 0; // No OCR1A/OCR1B connection, Normal mode.
-  TCCR1B = (1>>CS12); // Clock source: clk/265
-  TIMSK1 = (1>>OCIE1A) | (1>>TOIE1); // Two interrupt sources. Outputcompare match A, and timer overflow.
+  TCCR1B = 0x04; // (1>>CS12); // Clock source: clk/265
+  TIMSK1 = 0x03; //(1>>OCIE1A) | (1>>TOIE1); // Two interrupt sources. Outputcompare match A, and timer overflow.
 }
 
