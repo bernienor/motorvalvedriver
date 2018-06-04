@@ -12,9 +12,6 @@
 #define outputpin    12
 #define outputPinLED 13 // LED pin for test and flach for angleplate readout
 
-#define offset 40.0 // Hardcoded offset for system. Could also be set?
-
-
 void serport_handler(char d);
 void print_float(float f);
 void start_timer(void);
@@ -25,8 +22,8 @@ volatile unsigned long counts[16] = {0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0
 volatile unsigned long lastvalue = 0;
 volatile unsigned int counts_idx = 0;
 volatile int updated = 0;
-volatile float ontime = 0;
-volatile float offtime = 123.4;
+volatile float ontime = 10.0;
+volatile float offtime = 120.0;
 volatile char mode = 0;   // Bad name. Is used to keep track of the outputpinstate. Redundant?
 volatile uint16_t precalc_TCNT1 = 61717; // Test value
 volatile uint16_t precalc_OCR1A = 64495; // Test value
@@ -47,7 +44,7 @@ void measure_time() {
     updated = 1;
   }
   lastvalue = us;
-  delayMicroseconds(1000); // Flash time
+  delayMicroseconds(250); // Flash time
   digitalWrite(outputPinLED, LOW); // Turn led ON
 }
 
@@ -59,6 +56,8 @@ void measure_time() {
 **/
 void setup() {
   pinMode(detectorPin, INPUT);
+  pinMode(outputpin, OUTPUT);
+  pinMode(outputPinLED, OUTPUT);
 
   attachInterrupt(0, measure_time, RISING);
 
@@ -98,7 +97,7 @@ void update_precalcvalues(void)
   periodetidf = periodetid / 256; // Convert time in us to time in timer1 counts as well as devide by 16 for the average.
   
   // precalc_TCNT1:
-  temp = 65536.0 - (((offset+offtime)/360.0) * periodetidf);
+  temp = 65536.0 - (((offtime)/360.0) * periodetidf);
   precalc_TCNT1 = (uint16_t)temp;
   
   // precalc_OCR1A:
