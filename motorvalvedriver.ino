@@ -9,8 +9,17 @@
 // #define DEBUG 1
 
 #define detectorPin  2
-#define outputpin    12
+#define enablePin    4
+#define outputPin    12
 #define outputPinLED 13 // LED pin for test and flach for angleplate readout
+
+// Define the minimum rpm to allow the valve to open. 
+// Min 100 rpm -> Max periode time = 1/(100/60) ~= 600000
+// Min 200 rpm -> Max periode time = 1/(100/60) ~= 300000
+// Min 300 rpm -> Max periode time = 1/(100/60) ~= 200000
+// Min 400 rpm -> Max periode time = 1/(100/60) ~= 150000
+
+#define MAX_PERIODTIME_US 200000 // min 300 rpm
 
 void serport_handler(char d);
 void print_float(float f);
@@ -23,11 +32,11 @@ volatile unsigned long lastvalue = 0;
 volatile unsigned int counts_idx = 0;
 volatile int updated = 0;
 volatile float ontime = 10.0;
-volatile float offtime = 120.0;
+volatile float offtime = 130.0;
 volatile char mode = 0;   // Bad name. Is used to keep track of the outputpinstate. Redundant?
 volatile uint16_t precalc_TCNT1 = 61717; // Test value
 volatile uint16_t precalc_OCR1A = 64495; // Test value
-
+uint8_t timer_enable = 0;
 
 /**
    @brief Interrupt routine for the interrupt line.
@@ -53,10 +62,12 @@ void measure_time() {
    @brief Set up
    Sets up interrupt input for the detector.
    Sets up the serial port for receiving set values for the output.
+   Attaches interrupt function to external interupt 0 (P2)
 **/
 void setup() {
-  pinMode(detectorPin, INPUT);
-  pinMode(outputpin, OUTPUT);
+  pinMode(detectorPin, INPUT_PULLUP);
+  pinMode(enablePin, INPUT_PULLUP);
+  pinMode(outputPin, OUTPUT);
   pinMode(outputPinLED, OUTPUT);
 
   attachInterrupt(0, measure_time, RISING);
@@ -95,14 +106,22 @@ void update_precalcvalues(void)
     periodetid += counts[i];
   }
   periodetidf = periodetid / 256; // Convert time in us to time in timer1 counts as well as devide by 16 for the average.
-  
-  // precalc_TCNT1:
-  temp = 65536.0 - (((offtime)/360.0) * periodetidf);
-  precalc_TCNT1 = (uint16_t)temp;
-  
-  // precalc_OCR1A:
-  temp = 65536.0 - (((offtime-ontime)/360.0) * periodetidf);
-  precalc_OCR1A = (uint16_t)temp;
+
+  if(periodetid > (MAX_PERIODTIME_US * 16))
+  {
+    timer_enable = 0;
+  }
+  else 
+  {
+    timer_enable = 1;
+    // precalc_TCNT1:
+    temp = 65536.0 - (((offtime)/360.0) * periodetidf);
+    precalc_TCNT1 = (uint16_t)temp;
+    
+    // precalc_OCR1A:
+    temp = 65536.0 - (((offtime-ontime)/360.0) * periodetidf);
+    precalc_OCR1A = (uint16_t)temp;
+  }
 }
 
 /**
@@ -245,12 +264,14 @@ int verifyinput(char * text, float val) {
 ISR(TIMER1_OVF_vect)          // interrupt service routine that wraps a user defined function supplied by attachInterrupt
 {
   TCCR1B = 0; // stop timer
-  digitalWrite(outputpin, LOW); // Turn off output signal
+  digitalWrite(outputPin, LOW); // Turn off output signal
 }
 
 ISR(TIMER1_COMPA_vect)
 {
-  digitalWrite(outputpin, HIGH); // Turn off output signal  
+  if(digitalRead(enablePin)== 0){
+    digitalWrite(outputPin, HIGH); // Turn off output signal  
+  }
 }
 
 /**
@@ -266,12 +287,13 @@ ISR(BADISR_vect)
  * http://ww1.microchip.com/downloads/en/DeviceDoc/Atmel-42735-8-bit-AVR-Microcontroller-ATmega328-328P_Datasheet.pdf
 **/
 void start_timer(void) {
-
-  TCNT1 = precalc_TCNT1; // 61717; // test
-  OCR1A = precalc_OCR1A; // 64495;
-  // From datasheet p161: TCCR1A.WGM1[3:0]=0x0
-  TCCR1A = 0; // No OCR1A/OCR1B connection, Normal mode.
-  TCCR1B = 0x04; // (1>>CS12); // Clock source: clk/265
-  TIMSK1 = 0x03; //(1>>OCIE1A) | (1>>TOIE1); // Two interrupt sources. Outputcompare match A, and timer overflow.
+  if(timer_enable){
+    TCNT1 = precalc_TCNT1; // 61717; // test
+    OCR1A = precalc_OCR1A; // 64495;
+    // From datasheet p161: TCCR1A.WGM1[3:0]=0x0
+    TCCR1A = 0; // No OCR1A/OCR1B connection, Normal mode.
+    TCCR1B = 0x04; // (1>>CS12); // Clock source: clk/265
+    TIMSK1 = 0x03; //(1>>OCIE1A) | (1>>TOIE1); // Two interrupt sources. Outputcompare match A, and timer overflow.
+  }
 }
 
