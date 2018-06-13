@@ -19,7 +19,7 @@
 // Min 300 rpm -> Max periode time = 1/(100/60) ~= 200000
 // Min 400 rpm -> Max periode time = 1/(100/60) ~= 150000
 
-#define MAX_PERIODTIME_US 200000 // min 300 rpm
+#define MAX_PERIODTIME_US 300000 // min 300 rpm
 
 void serport_handler(char d);
 void print_float(float f);
@@ -48,13 +48,13 @@ void measure_time() {
   digitalWrite(outputPinLED, HIGH); // Turn led ON
   start_timer();
   if (us > lastvalue) {
-    counts[counts_idx] = us - lastvalue;
+    counts[0] = us - lastvalue;  // no average - Should have been a compile time switch
     counts_idx = (counts_idx + 1) % 16;
     updated = 1;
   }
   lastvalue = us;
-  delayMicroseconds(250); // Flash time
-  digitalWrite(outputPinLED, LOW); // Turn led ON
+//  delayMicroseconds(250); // Flash time
+//  digitalWrite(outputPinLED, LOW); // Turn led ON
 }
 
 
@@ -102,26 +102,21 @@ void update_precalcvalues(void)
   float periodetidf;
 
 
-  for(int i = 0; i<16;i++){
+/*  for(int i = 0; i<16;i++){
     periodetid += counts[i];
   }
   periodetidf = periodetid / 256; // Convert time in us to time in timer1 counts as well as devide by 16 for the average.
+*/
+  periodetidf = counts[0] / 16; // Convert time in us to time in timer1 counts.
 
-  if(periodetid > (MAX_PERIODTIME_US * 16))
-  {
-    timer_enable = 0;
-  }
-  else 
-  {
-    timer_enable = 1;
-    // precalc_TCNT1:
-    temp = 65536.0 - (((offtime)/360.0) * periodetidf);
-    precalc_TCNT1 = (uint16_t)temp;
+  timer_enable = 1;
+  // precalc_TCNT1:
+  temp = 65536.0 - (((offtime)/360.0) * periodetidf);
+  precalc_TCNT1 = (uint16_t)temp;
     
-    // precalc_OCR1A:
-    temp = 65536.0 - (((offtime-ontime)/360.0) * periodetidf);
-    precalc_OCR1A = (uint16_t)temp;
-  }
+  // precalc_OCR1A:
+  temp = 65536.0 - (((offtime-ontime)/360.0) * periodetidf);
+  precalc_OCR1A = (uint16_t)temp;
 }
 
 /**
@@ -265,12 +260,14 @@ ISR(TIMER1_OVF_vect)          // interrupt service routine that wraps a user def
 {
   TCCR1B = 0; // stop timer
   digitalWrite(outputPin, LOW); // Turn off output signal
+  digitalWrite(outputPinLED, HIGH); // Turn led off
 }
 
 ISR(TIMER1_COMPA_vect)
 {
   if(digitalRead(enablePin)== 0){
-    digitalWrite(outputPin, HIGH); // Turn off output signal  
+    digitalWrite(outputPin, HIGH); // Turn on output signal  
+    digitalWrite(outputPinLED, LOW); // Turn led ON
   }
 }
 
