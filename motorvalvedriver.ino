@@ -19,7 +19,7 @@
 // Min 300 rpm -> Max periode time = 1/(100/60) ~= 200000
 // Min 400 rpm -> Max periode time = 1/(100/60) ~= 150000
 
-#define MAX_PERIODTIME_US 300000 // min 300 rpm
+#define MAX_PERIODTIME_US 300000 // min 200 rpm
 
 void serport_handler(char d);
 void print_float(float f);
@@ -260,14 +260,14 @@ ISR(TIMER1_OVF_vect)          // interrupt service routine that wraps a user def
 {
   TCCR1B = 0; // stop timer
   digitalWrite(outputPin, LOW); // Turn off output signal
-  digitalWrite(outputPinLED, HIGH); // Turn led off
+  digitalWrite(outputPinLED, LOW); // Turn led off
 }
 
 ISR(TIMER1_COMPA_vect)
 {
   if(digitalRead(enablePin)== 0){
     digitalWrite(outputPin, HIGH); // Turn on output signal  
-    digitalWrite(outputPinLED, LOW); // Turn led ON
+    digitalWrite(outputPinLED, HIGH); // Turn led ON
   }
 }
 
